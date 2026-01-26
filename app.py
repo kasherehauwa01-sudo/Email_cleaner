@@ -50,9 +50,11 @@ MANAGER_BLOCKLIST = {
 
 @st.cache_data(show_spinner=False)
 def parse_html_tables(html_bytes: bytes) -> List[pd.DataFrame]:
-    """Читает HTML и возвращает список таблиц."""
+    """Читает HTML и возвращает список таблиц, предварительно удаляя первую строку."""
     try:
         html_text = html_bytes.decode("utf-8", errors="ignore")
+        lines = html_text.splitlines()
+        html_text = "\n".join(lines[1:]) if len(lines) > 1 else ""
         return pd.read_html(io.StringIO(html_text))
     except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
         raise ValueError(f"Не удалось прочитать HTML: {exc}") from exc
@@ -163,8 +165,18 @@ if uploaded_file is None:
     st.info("Загрузите файл, чтобы начать обработку.")
     st.stop()
 
+log_messages: List[str] = []
+
+
+def _log(message: str) -> None:
+    """Добавляет сообщение в журнал обработки."""
+    log_messages.append(message)
+
+
 try:
+    _log("Начинаем парсинг HTML и удаляем первую строку файла.")
     tables = parse_html_tables(uploaded_file.getvalue())
+    _log(f"Найдено таблиц: {len(tables)}.")
 except ValueError as exc:
     st.error(str(exc))
     st.stop()
@@ -174,6 +186,7 @@ if not tables:
     st.stop()
 
 if len(tables) > 1:
+    _log("В HTML обнаружено несколько таблиц, ожидаем выбор пользователя.")
     st.warning("Найдено несколько таблиц. Выберите нужную.")
     table_options = []
     for idx, table in enumerate(tables, start=1):
@@ -186,11 +199,14 @@ if len(tables) > 1:
         format_func=lambda option: f"Таблица {option[0]}\n{option[1]}",
     )
     selected_table = tables[selected[0] - 1]
+    _log(f"Выбрана таблица номер {selected[0]}.")
 else:
     selected_table = tables[0]
+    _log("Используется единственная таблица в HTML.")
 
 normalized_table = normalize_columns(selected_table)
 columns = list(normalized_table.columns)
+_log(f"Нормализованные колонки: {', '.join(columns)}.")
 
 client_col = _find_column(columns, ("клиент",))
 email_col = _find_column(columns, ("e-mail", "email", "e mail"))
@@ -203,10 +219,16 @@ if not client_col or not email_col or not manager_col:
     )
     st.stop()
 
+_log(
+    "Найдены колонки: "
+    f"Клиент -> {client_col}, Email -> {email_col}, Менеджер -> {manager_col}."
+)
 initial_count = len(normalized_table)
+_log(f"Исходных строк: {initial_count}.")
 
 step1 = normalized_table[normalized_table[email_col].str.contains("@", na=False)]
 step1_count = len(step1)
+_log(f"После фильтра Email осталось строк: {step1_count}.")
 
 filtered_manager = step1.copy()
 filtered_manager["_manager_norm"] = filtered_manager[manager_col].apply(_normalize_manager)
@@ -215,12 +237,15 @@ step2 = filtered_manager[
     & (~filtered_manager["_manager_norm"].isin(MANAGER_BLOCKLIST))
 ].drop(columns=["_manager_norm"])
 step2_count = len(step2)
+_log(f"После фильтра Менеджеров осталось строк: {step2_count}.")
 
 step3 = clean_and_expand_emails(step2, email_col)
 step3_count = len(step3)
+_log(f"После очистки и разбиения Email осталось строк: {step3_count}.")
 
 step4 = step3.drop_duplicates(subset=[email_col], keep="first")
 step4_count = len(step4)
+_log(f"После дедупликации осталось строк: {step4_count}.")
 
 result = step4[[client_col, email_col, manager_col]].rename(
     columns={client_col: "Клиент", email_col: "Email", manager_col: "Менеджер"}
@@ -236,6 +261,9 @@ metrics_cols[4].metric("После дедупликации", step4_count, delta
 
 st.subheader("Предпросмотр результата")
 st.dataframe(result.head(10), use_container_width=True)
+
+with st.expander("Журнал обработки", expanded=False):
+    st.text("\n".join(log_messages))
 
 st.markdown("---")
 st.subheader("Распределение по группам")
