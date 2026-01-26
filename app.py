@@ -81,6 +81,28 @@ def _find_column(columns: List[str], keywords: Tuple[str, ...]) -> str | None:
     return None
 
 
+def _find_header_row(df: pd.DataFrame) -> int | None:
+    """Ищет строку, которая содержит заголовки Клиент/Email/Менеджер."""
+    keywords = ("клиент", "e-mail", "email", "e mail", "менеджер")
+    for idx in range(len(df)):
+        row_values = df.iloc[idx].astype(str).fillna("").tolist()
+        normalized_cells = [
+            re.sub(r"\s+", " ", value).strip().lower() for value in row_values
+        ]
+        if any(keyword in cell for cell in normalized_cells for keyword in keywords):
+            return idx
+    return None
+
+
+def _promote_header_row(df: pd.DataFrame, header_idx: int) -> pd.DataFrame:
+    """Поднимает строку header_idx в заголовок таблицы."""
+    promoted = df.copy()
+    new_columns = promoted.iloc[header_idx].astype(str).fillna("").tolist()
+    promoted = promoted.drop(index=range(header_idx + 1)).reset_index(drop=True)
+    promoted.columns = new_columns
+    return promoted
+
+
 def _normalize_manager(value: str) -> str:
     """Нормализует значения менеджеров для фильтрации."""
     cleaned = value.strip()
@@ -211,6 +233,19 @@ _log(f"Нормализованные колонки: {', '.join(columns)}.")
 client_col = _find_column(columns, ("клиент",))
 email_col = _find_column(columns, ("e-mail", "email", "e mail"))
 manager_col = _find_column(columns, ("менеджер",))
+
+if not client_col or not email_col or not manager_col:
+    _log("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
+    header_idx = _find_header_row(selected_table.fillna("").astype(str))
+    if header_idx is not None:
+        _log(f"Заголовки найдены в строке {header_idx + 1}, поднимаем её.")
+        selected_table = _promote_header_row(selected_table, header_idx)
+        normalized_table = normalize_columns(selected_table)
+        columns = list(normalized_table.columns)
+        _log(f"Обновленные колонки: {', '.join(columns)}.")
+        client_col = _find_column(columns, ("клиент",))
+        email_col = _find_column(columns, ("e-mail", "email", "e mail"))
+        manager_col = _find_column(columns, ("менеджер",))
 
 if not client_col or not email_col or not manager_col:
     st.error(
