@@ -50,6 +50,32 @@ MANAGER_BLOCKLIST = {
     "яицкая ольга",
 }
 
+RETAIL_CLIENT_EXCLUDE_KEYWORDS = [
+    "(сотрудник)",
+    "ип",
+    "(закрылась)",
+    "(закрыта)",
+    "ооо",
+    "зао",
+    "муп",
+    "моу",
+    "фгку",
+    "ао",
+    "мбоу",
+    "оао",
+    "гуп",
+    "вдгоо",
+    "тск",
+    "гбпоу",
+    "мбу",
+    "гувд",
+    "усзн",
+    "ск-кристалл строительная компания",
+    "стс-волгоград",
+    "фгуп",
+    "гуз",
+]
+
 
 @st.cache_data(show_spinner=False)
 def parse_html_tables(html_bytes: bytes) -> List[pd.DataFrame]:
@@ -628,8 +654,14 @@ with tab_retail_base:
         initial_count_retail = len(normalized_table_retail)
         _log_retail(f"Исходных строк: {initial_count_retail}.")
 
+        client_values_retail = normalized_table_retail[client_col_retail].astype(str).str.casefold()
+        exclude_pattern_retail = r"|".join(
+            rf"\b{keyword}\b" if keyword in {"ип", "ао"} else re.escape(keyword)
+            for keyword in RETAIL_CLIENT_EXCLUDE_KEYWORDS
+        )
         step1_retail = normalized_table_retail[
             normalized_table_retail[email_col_retail].str.contains("@", na=False)
+            & ~client_values_retail.str.contains(exclude_pattern_retail, na=False, regex=True)
         ]
         step1_count_retail = len(step1_retail)
         _log_retail(f"После фильтра Email осталось строк: {step1_count_retail}.")
