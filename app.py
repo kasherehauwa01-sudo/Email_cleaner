@@ -186,178 +186,197 @@ st.set_page_config(page_title="Email Cleaner", layout="wide")
 
 st.title("Обновление Email баз. Оптовые клиенты")
 
-uploaded_file = st.file_uploader(
-    "Загрузите HTML файл",
-    type=["html", "htm"],
-)
-
-if uploaded_file is None:
-    st.info("Загрузите файл, чтобы начать обработку.")
-    st.stop()
-
-log_messages: List[str] = []
-
-
-def _log(message: str) -> None:
-    """Добавляет сообщение в журнал обработки."""
-    log_messages.append(message)
-
-
-try:
-    _log("Начинаем парсинг HTML и удаляем первую строку файла.")
-    tables = parse_html_tables(uploaded_file.getvalue())
-    _log(f"Найдено таблиц: {len(tables)}.")
-except ValueError as exc:
-    st.error(str(exc))
-    st.stop()
-
-if not tables:
-    st.error("В HTML не найдено таблиц.")
-    st.stop()
-
-if len(tables) > 1:
-    _log("В HTML обнаружено несколько таблиц, ожидаем выбор пользователя.")
-    st.warning("Найдено несколько таблиц. Выберите нужную.")
-    table_options = []
-    for idx, table in enumerate(tables, start=1):
-        preview = table.head(3).to_string(index=False)
-        table_options.append((idx, preview))
-
-    selected = st.selectbox(
-        "Таблица",
-        options=table_options,
-        format_func=lambda option: f"Таблица {option[0]}\n{option[1]}",
-    )
-    selected_table = tables[selected[0] - 1]
-    _log(f"Выбрана таблица номер {selected[0]}.")
-else:
-    selected_table = tables[0]
-    _log("Используется единственная таблица в HTML.")
-
-normalized_table = normalize_columns(selected_table)
-columns = list(normalized_table.columns)
-_log(f"Нормализованные колонки: {', '.join(columns)}.")
-
-client_col = _find_column(columns, ("клиент",))
-email_col = _find_column(columns, ("e-mail", "email", "e mail"))
-manager_col = _find_column(columns, ("менеджер",))
-
-if not client_col or not email_col or not manager_col:
-    _log("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
-    header_idx = _find_header_row(selected_table.fillna("").astype(str))
-    if header_idx is not None:
-        _log(f"Заголовки найдены в строке {header_idx + 1}, поднимаем её.")
-        selected_table = _promote_header_row(selected_table, header_idx)
-        normalized_table = normalize_columns(selected_table)
-        columns = list(normalized_table.columns)
-        _log(f"Обновленные колонки: {', '.join(columns)}.")
-        client_col = _find_column(columns, ("клиент",))
-        email_col = _find_column(columns, ("e-mail", "email", "e mail"))
-        manager_col = _find_column(columns, ("менеджер",))
-
-if not client_col or not email_col or not manager_col:
-    st.error(
-        "Не удалось найти все обязательные колонки: Клиент, E-mail, Менеджер. "
-        "Проверьте заголовки таблицы."
-    )
-    st.stop()
-
-_log(
-    "Найдены колонки: "
-    f"Клиент -> {client_col}, Email -> {email_col}, Менеджер -> {manager_col}."
-)
-initial_count = len(normalized_table)
-_log(f"Исходных строк: {initial_count}.")
-
-step1 = normalized_table[normalized_table[email_col].str.contains("@", na=False)]
-step1_count = len(step1)
-_log(f"После фильтра Email осталось строк: {step1_count}.")
-
-filtered_manager = step1.copy()
-filtered_manager["_manager_norm"] = filtered_manager[manager_col].apply(_normalize_manager)
-step2 = filtered_manager[
-    (filtered_manager["_manager_norm"] != "")
-    & (~filtered_manager["_manager_norm"].isin(MANAGER_BLOCKLIST))
-].drop(columns=["_manager_norm"])
-step2_count = len(step2)
-_log(f"После фильтра Менеджеров осталось строк: {step2_count}.")
-
-step3 = clean_and_expand_emails(step2, email_col)
-step3_count = len(step3)
-_log(f"После очистки и разбиения Email осталось строк: {step3_count}.")
-
-step4 = step3.drop_duplicates(subset=[email_col], keep="first")
-step4_count = len(step4)
-_log(f"После дедупликации осталось строк: {step4_count}.")
-
-result_full = step4[[client_col, email_col, manager_col]].rename(
-    columns={client_col: "Клиент", email_col: "Email", manager_col: "Менеджер"}
-)
-result_preview = result_full.drop(columns=["Менеджер"])
-
-st.subheader("Метрики обработки")
-metrics_cols = st.columns(5)
-metrics_cols[0].metric("Исходные строки", initial_count)
-metrics_cols[1].metric("После фильтра Email", step1_count, delta=step1_count - initial_count)
-metrics_cols[2].metric("После фильтра Менеджеров", step2_count, delta=step2_count - step1_count)
-metrics_cols[3].metric("После очистки Email", step3_count, delta=step3_count - step2_count)
-metrics_cols[4].metric("После дедупликации", step4_count, delta=step4_count - step3_count)
-
-st.markdown("---")
-st.subheader("Распределение по группам")
-
-unique_managers = sorted(result_full["Менеджер"].unique())
-
-selected_managers = {}
-for group_name in GROUPS:
-    key = f"group_{group_name}"
-    if key not in st.session_state:
-        defaults = [name for name in DEFAULT_SELECTIONS.get(group_name, []) if name in unique_managers]
-        st.session_state[key] = defaults
-
-    selected_in_other_groups = set()
-    for other_group in GROUPS:
-        other_key = f"group_{other_group}"
-        if other_key == key:
-            continue
-        selected_in_other_groups.update(st.session_state.get(other_key, []))
-
-    current_selection = st.session_state.get(key, [])
-    available_options = [
-        manager
-        for manager in unique_managers
-        if manager not in selected_in_other_groups or manager in current_selection
+tab_opt, tab_corp, tab_retail_base, tab_retail_site = st.tabs(
+    [
+        "Оптовые клиенты",
+        "Корпоративные клиенты",
+        "Розничные клиенты (база)",
+        "Розничные клиенты (сайт)",
     ]
-
-    st.markdown(f"**{group_name}**")
-    selected_managers[group_name] = st.multiselect(
-        "Выбор менеджера",
-        options=available_options,
-        default=current_selection,
-        key=key,
-    )
-selected_all = set()
-for managers in selected_managers.values():
-    selected_all.update(managers)
-
-remaining_managers = [manager for manager in unique_managers if manager not in selected_all]
-if remaining_managers:
-    st.caption("Не выбраны: " + ", ".join(remaining_managers))
-else:
-    st.caption("Выбраны все")
-
-group_frames = {}
-for group_name, managers in selected_managers.items():
-    filtered = result_full[result_full["Менеджер"].isin(managers)].copy()
-    group_frames[group_name] = filtered.drop(columns=["Менеджер"])
-
-zip_bytes = build_zip_archive(group_frames)
-st.download_button(
-    label="Скачать архив XLSX",
-    data=zip_bytes,
-    file_name="email_groups.zip",
-    mime="application/zip",
 )
 
-with st.expander("Журнал обработки", expanded=False):
-    st.text("\n".join(log_messages))
+with tab_opt:
+    uploaded_file = st.file_uploader(
+        "Загрузите HTML файл",
+        type=["html", "htm"],
+    )
+
+    if uploaded_file is None:
+        st.info("Загрузите файл, чтобы начать обработку.")
+        st.stop()
+
+    log_messages: List[str] = []
+
+    def _log(message: str) -> None:
+        """Добавляет сообщение в журнал обработки."""
+        log_messages.append(message)
+
+    try:
+        _log("Начинаем парсинг HTML и удаляем первую строку файла.")
+        tables = parse_html_tables(uploaded_file.getvalue())
+        _log(f"Найдено таблиц: {len(tables)}.")
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
+
+    if not tables:
+        st.error("В HTML не найдено таблиц.")
+        st.stop()
+
+    if len(tables) > 1:
+        _log("В HTML обнаружено несколько таблиц, ожидаем выбор пользователя.")
+        st.warning("Найдено несколько таблиц. Выберите нужную.")
+        table_options = []
+        for idx, table in enumerate(tables, start=1):
+            preview = table.head(3).to_string(index=False)
+            table_options.append((idx, preview))
+
+        selected = st.selectbox(
+            "Таблица",
+            options=table_options,
+            format_func=lambda option: f"Таблица {option[0]}\n{option[1]}",
+        )
+        selected_table = tables[selected[0] - 1]
+        _log(f"Выбрана таблица номер {selected[0]}.")
+    else:
+        selected_table = tables[0]
+        _log("Используется единственная таблица в HTML.")
+
+    normalized_table = normalize_columns(selected_table)
+    columns = list(normalized_table.columns)
+    _log(f"Нормализованные колонки: {', '.join(columns)}.")
+
+    client_col = _find_column(columns, ("клиент",))
+    email_col = _find_column(columns, ("e-mail", "email", "e mail"))
+    manager_col = _find_column(columns, ("менеджер",))
+
+    if not client_col or not email_col or not manager_col:
+        _log("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
+        header_idx = _find_header_row(selected_table.fillna("").astype(str))
+        if header_idx is not None:
+            _log(f"Заголовки найдены в строке {header_idx + 1}, поднимаем её.")
+            selected_table = _promote_header_row(selected_table, header_idx)
+            normalized_table = normalize_columns(selected_table)
+            columns = list(normalized_table.columns)
+            _log(f"Обновленные колонки: {', '.join(columns)}.")
+            client_col = _find_column(columns, ("клиент",))
+            email_col = _find_column(columns, ("e-mail", "email", "e mail"))
+            manager_col = _find_column(columns, ("менеджер",))
+
+    if not client_col or not email_col or not manager_col:
+        st.error(
+            "Не удалось найти все обязательные колонки: Клиент, E-mail, Менеджер. "
+            "Проверьте заголовки таблицы."
+        )
+        st.stop()
+
+    _log(
+        "Найдены колонки: "
+        f"Клиент -> {client_col}, Email -> {email_col}, Менеджер -> {manager_col}."
+    )
+    initial_count = len(normalized_table)
+    _log(f"Исходных строк: {initial_count}.")
+
+    step1 = normalized_table[normalized_table[email_col].str.contains("@", na=False)]
+    step1_count = len(step1)
+    _log(f"После фильтра Email осталось строк: {step1_count}.")
+
+    filtered_manager = step1.copy()
+    filtered_manager["_manager_norm"] = filtered_manager[manager_col].apply(_normalize_manager)
+    step2 = filtered_manager[
+        (filtered_manager["_manager_norm"] != "")
+        & (~filtered_manager["_manager_norm"].isin(MANAGER_BLOCKLIST))
+    ].drop(columns=["_manager_norm"])
+    step2_count = len(step2)
+    _log(f"После фильтра Менеджеров осталось строк: {step2_count}.")
+
+    step3 = clean_and_expand_emails(step2, email_col)
+    step3_count = len(step3)
+    _log(f"После очистки и разбиения Email осталось строк: {step3_count}.")
+
+    step4 = step3.drop_duplicates(subset=[email_col], keep="first")
+    step4_count = len(step4)
+    _log(f"После дедупликации осталось строк: {step4_count}.")
+
+    result_full = step4[[client_col, email_col, manager_col]].rename(
+        columns={client_col: "Клиент", email_col: "Email", manager_col: "Менеджер"}
+    )
+    result_preview = result_full.drop(columns=["Менеджер"])
+
+    st.subheader("Метрики обработки")
+    metrics_cols = st.columns(5)
+    metrics_cols[0].metric("Исходные строки", initial_count)
+    metrics_cols[1].metric("После фильтра Email", step1_count, delta=step1_count - initial_count)
+    metrics_cols[2].metric("После фильтра Менеджеров", step2_count, delta=step2_count - step1_count)
+    metrics_cols[3].metric("После очистки Email", step3_count, delta=step3_count - step2_count)
+    metrics_cols[4].metric("После дедупликации", step4_count, delta=step4_count - step3_count)
+
+    st.markdown("---")
+    st.subheader("Распределение по группам")
+
+    unique_managers = sorted(result_full["Менеджер"].unique())
+
+    selected_managers = {}
+    for group_name in GROUPS:
+        key = f"group_{group_name}"
+        if key not in st.session_state:
+            defaults = [
+                name for name in DEFAULT_SELECTIONS.get(group_name, []) if name in unique_managers
+            ]
+            st.session_state[key] = defaults
+
+        selected_in_other_groups = set()
+        for other_group in GROUPS:
+            other_key = f"group_{other_group}"
+            if other_key == key:
+                continue
+            selected_in_other_groups.update(st.session_state.get(other_key, []))
+
+        current_selection = st.session_state.get(key, [])
+        available_options = [
+            manager
+            for manager in unique_managers
+            if manager not in selected_in_other_groups or manager in current_selection
+        ]
+
+        st.markdown(f"**{group_name}**")
+        selected_managers[group_name] = st.multiselect(
+            "Выбор менеджера",
+            options=available_options,
+            default=current_selection,
+            key=key,
+        )
+    selected_all = set()
+    for managers in selected_managers.values():
+        selected_all.update(managers)
+
+    remaining_managers = [manager for manager in unique_managers if manager not in selected_all]
+    if remaining_managers:
+        st.caption("Не выбраны: " + ", ".join(remaining_managers))
+    else:
+        st.caption("Выбраны все")
+
+    group_frames = {}
+    for group_name, managers in selected_managers.items():
+        filtered = result_full[result_full["Менеджер"].isin(managers)].copy()
+        group_frames[group_name] = filtered.drop(columns=["Менеджер"])
+
+    zip_bytes = build_zip_archive(group_frames)
+    st.download_button(
+        label="Скачать архив XLSX",
+        data=zip_bytes,
+        file_name="email_groups.zip",
+        mime="application/zip",
+    )
+
+    with st.expander("Журнал обработки", expanded=False):
+        st.text("\n".join(log_messages))
+
+with tab_corp:
+    st.info("Вкладка «Корпоративные клиенты» пока пустая.")
+
+with tab_retail_base:
+    st.info("Вкладка «Розничные клиенты (база)» пока пустая.")
+
+with tab_retail_site:
+    st.info("Вкладка «Розничные клиенты (сайт)» пока пустая.")
