@@ -519,7 +519,181 @@ with tab_corp:
             st.text("\n".join(log_messages_corp))
 
 with tab_retail_base:
-    st.info("Вкладка «Розничные клиенты (база)» пока пустая.")
+    uploaded_file_retail_base = st.file_uploader(
+        "Загрузите HTML файл",
+        type=["html", "htm"],
+        key="retail_base_uploader",
+    )
+    include_phone = st.checkbox("Номер телефона", key="retail_base_phone")
+
+    if uploaded_file_retail_base is None:
+        st.info("Загрузите файл, чтобы начать обработку.")
+    else:
+        log_messages_retail: List[str] = []
+
+        def _log_retail(message: str) -> None:
+            """Добавляет сообщение в журнал обработки."""
+            log_messages_retail.append(message)
+
+        try:
+            _log_retail("Начинаем парсинг HTML и удаляем первую строку файла.")
+            tables_retail = parse_html_tables(uploaded_file_retail_base.getvalue())
+            _log_retail(f"Найдено таблиц: {len(tables_retail)}.")
+        except ValueError as exc:
+            st.error(str(exc))
+            st.stop()
+
+        if not tables_retail:
+            st.error("В HTML не найдено таблиц.")
+            st.stop()
+
+        if len(tables_retail) > 1:
+            _log_retail("В HTML обнаружено несколько таблиц, ожидаем выбор пользователя.")
+            st.warning("Найдено несколько таблиц. Выберите нужную.")
+            table_options_retail = []
+            for idx, table in enumerate(tables_retail, start=1):
+                preview = table.head(3).to_string(index=False)
+                table_options_retail.append((idx, preview))
+
+            selected_retail = st.selectbox(
+                "Таблица",
+                options=table_options_retail,
+                format_func=lambda option: f"Таблица {option[0]}\n{option[1]}",
+                key="retail_base_table",
+            )
+            selected_table_retail = tables_retail[selected_retail[0] - 1]
+            _log_retail(f"Выбрана таблица номер {selected_retail[0]}.")
+        else:
+            selected_table_retail = tables_retail[0]
+            _log_retail("Используется единственная таблица в HTML.")
+
+        normalized_table_retail = normalize_columns(selected_table_retail)
+        columns_retail = list(normalized_table_retail.columns)
+        _log_retail(f"Нормализованные колонки: {', '.join(columns_retail)}.")
+
+        client_col_retail = _find_column(columns_retail, ("клиент",))
+        email_col_retail = _find_column(columns_retail, ("e-mail", "email", "e mail"))
+        manager_col_retail = _find_column(columns_retail, ("менеджер",))
+        place_col_retail = _find_column(columns_retail, ("место последней покупки",))
+        birthday_col_retail = _find_column(columns_retail, ("день рождения",))
+        phone_col_retail = _find_column(columns_retail, ("телефон",))
+
+        if (
+            not client_col_retail
+            or not email_col_retail
+            or not manager_col_retail
+            or not place_col_retail
+            or not birthday_col_retail
+        ):
+            _log_retail("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
+            header_idx_retail = _find_header_row(selected_table_retail.fillna("").astype(str))
+            if header_idx_retail is not None:
+                _log_retail(f"Заголовки найдены в строке {header_idx_retail + 1}, поднимаем её.")
+                selected_table_retail = _promote_header_row(
+                    selected_table_retail, header_idx_retail
+                )
+                normalized_table_retail = normalize_columns(selected_table_retail)
+                columns_retail = list(normalized_table_retail.columns)
+                _log_retail(f"Обновленные колонки: {', '.join(columns_retail)}.")
+                client_col_retail = _find_column(columns_retail, ("клиент",))
+                email_col_retail = _find_column(columns_retail, ("e-mail", "email", "e mail"))
+                manager_col_retail = _find_column(columns_retail, ("менеджер",))
+                place_col_retail = _find_column(columns_retail, ("место последней покупки",))
+                birthday_col_retail = _find_column(columns_retail, ("день рождения",))
+                phone_col_retail = _find_column(columns_retail, ("телефон",))
+
+        if (
+            not client_col_retail
+            or not email_col_retail
+            or not manager_col_retail
+            or not place_col_retail
+            or not birthday_col_retail
+        ):
+            st.error(
+                "Не удалось найти все обязательные колонки: Клиент, E-mail, Менеджер, "
+                "Место последней покупки, День рождения. Проверьте заголовки таблицы."
+            )
+            st.stop()
+
+        if include_phone and not phone_col_retail:
+            st.error("Не удалось найти колонку Телефон. Проверьте заголовки таблицы.")
+            st.stop()
+
+        _log_retail(
+            "Найдены колонки: "
+            f"Клиент -> {client_col_retail}, Email -> {email_col_retail}, "
+            f"Менеджер -> {manager_col_retail}, Место последней покупки -> {place_col_retail}, "
+            f"День рождения -> {birthday_col_retail}."
+        )
+        initial_count_retail = len(normalized_table_retail)
+        _log_retail(f"Исходных строк: {initial_count_retail}.")
+
+        step1_retail = normalized_table_retail[
+            normalized_table_retail[email_col_retail].str.contains("@", na=False)
+        ]
+        step1_count_retail = len(step1_retail)
+        _log_retail(f"После фильтра Email осталось строк: {step1_count_retail}.")
+
+        filtered_manager_retail = step1_retail.copy()
+        filtered_manager_retail["_manager_norm"] = filtered_manager_retail[
+            manager_col_retail
+        ].apply(_normalize_manager)
+        step2_retail = filtered_manager_retail[
+            filtered_manager_retail["_manager_norm"] == ""
+        ].drop(columns=["_manager_norm"])
+        step2_count_retail = len(step2_retail)
+        _log_retail(f"После фильтра Менеджеров осталось строк: {step2_count_retail}.")
+
+        step3_retail = clean_and_expand_emails(step2_retail, email_col_retail)
+        step3_count_retail = len(step3_retail)
+        _log_retail(f"После очистки и разбиения Email осталось строк: {step3_count_retail}.")
+
+        step4_retail = step3_retail.drop_duplicates(subset=[email_col_retail], keep="first")
+        step4_count_retail = len(step4_retail)
+        _log_retail(f"После дедупликации осталось строк: {step4_count_retail}.")
+
+        result_full_retail = step4_retail[
+            [client_col_retail, email_col_retail, place_col_retail, birthday_col_retail]
+        ].rename(
+            columns={
+                client_col_retail: "Клиент",
+                email_col_retail: "Email",
+                place_col_retail: "Место последней покупки",
+                birthday_col_retail: "День рождения",
+            }
+        )
+
+        if include_phone:
+            result_full_retail["Телефон"] = step4_retail[phone_col_retail].values
+
+        st.subheader("Метрики обработки")
+        metrics_cols_retail = st.columns(5)
+        metrics_cols_retail[0].metric("Исходные строки", initial_count_retail)
+        metrics_cols_retail[1].metric(
+            "После фильтра Email", step1_count_retail, delta=step1_count_retail - initial_count_retail
+        )
+        metrics_cols_retail[2].metric(
+            "После фильтра Менеджеров",
+            step2_count_retail,
+            delta=step2_count_retail - step1_count_retail,
+        )
+        metrics_cols_retail[3].metric(
+            "После очистки Email", step3_count_retail, delta=step3_count_retail - step2_count_retail
+        )
+        metrics_cols_retail[4].metric(
+            "После дедупликации", step4_count_retail, delta=step4_count_retail - step3_count_retail
+        )
+
+        xlsx_bytes_retail = build_xlsx_bytes(result_full_retail)
+        st.download_button(
+            label="Скачать файл XLSX",
+            data=xlsx_bytes_retail,
+            file_name="retail_base_emails.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with st.expander("Журнал обработки", expanded=False):
+            st.text("\n".join(log_messages_retail))
 
 with tab_retail_site:
     st.info("Вкладка «Розничные клиенты (сайт)» пока пустая.")
