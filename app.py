@@ -62,19 +62,6 @@ def parse_html_tables(html_bytes: bytes) -> List[pd.DataFrame]:
 
 
 @st.cache_data(show_spinner=False)
-def parse_xml_tables(xml_bytes: bytes) -> List[pd.DataFrame]:
-    """Читает XML и возвращает список таблиц (одна таблица = один DataFrame)."""
-    try:
-        xml_text = xml_bytes.decode("utf-8", errors="ignore")
-        df = pd.read_xml(io.StringIO(xml_text))
-        if df is None:
-            return []
-        return [df]
-    except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
-        raise ValueError(f"Не удалось прочитать XML: {exc}") from exc
-
-
-@st.cache_data(show_spinner=False)
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Приводит все значения к строкам и нормализует заголовки колонок."""
     normalized = df.copy()
@@ -196,8 +183,8 @@ st.set_page_config(page_title="Email Cleaner", layout="wide")
 st.title("Очистка и распределение email по группам")
 
 uploaded_file = st.file_uploader(
-    "Загрузите HTML/XML файл",
-    type=["html", "htm", "xml"],
+    "Загрузите HTML файл",
+    type=["html", "htm"],
 )
 
 if uploaded_file is None:
@@ -213,21 +200,15 @@ def _log(message: str) -> None:
 
 
 try:
-    file_name = (uploaded_file.name or "").lower()
-    is_xml = file_name.endswith(".xml")
-    if is_xml:
-        _log("Начинаем парсинг XML файла.")
-        tables = parse_xml_tables(uploaded_file.getvalue())
-    else:
-        _log("Начинаем парсинг HTML и удаляем первую строку файла.")
-        tables = parse_html_tables(uploaded_file.getvalue())
+    _log("Начинаем парсинг HTML и удаляем первую строку файла.")
+    tables = parse_html_tables(uploaded_file.getvalue())
     _log(f"Найдено таблиц: {len(tables)}.")
 except ValueError as exc:
     st.error(str(exc))
     st.stop()
 
 if not tables:
-    st.error("В HTML/XML не найдено таблиц.")
+    st.error("В HTML не найдено таблиц.")
     st.stop()
 
 if len(tables) > 1:
