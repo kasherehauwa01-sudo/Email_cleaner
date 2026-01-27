@@ -50,12 +50,13 @@ MANAGER_BLOCKLIST = {
 
 @st.cache_data(show_spinner=False)
 def parse_html_tables(html_bytes: bytes) -> List[pd.DataFrame]:
-    """Читает HTML и возвращает список таблиц, предварительно удаляя первую строку."""
+    """Читает HTML (cp1251) и возвращает список таблиц с заголовками из второй строки."""
     try:
-        html_text = html_bytes.decode("utf-8", errors="ignore")
-        lines = html_text.splitlines()
-        html_text = "\n".join(lines[1:]) if len(lines) > 1 else ""
-        return pd.read_html(io.StringIO(html_text))
+        html_text = html_bytes.decode("cp1251", errors="replace")
+        tables = pd.read_html(io.StringIO(html_text), header=1)
+        for table in tables:
+            table.columns = [str(col).strip() for col in table.columns]
+        return tables
     except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
         raise ValueError(f"Не удалось прочитать HTML: {exc}") from exc
 
