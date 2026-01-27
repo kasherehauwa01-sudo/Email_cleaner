@@ -717,10 +717,11 @@ with tab_retail_base:
         )
 
         xlsx_bytes_retail = build_xlsx_bytes(result_full_retail)
+        email_count_retail = len(result_full_retail)
         st.download_button(
             label="Скачать файл XLSX",
             data=xlsx_bytes_retail,
-            file_name="retail_base_emails.xlsx",
+            file_name=f"retail_base_emails ({email_count_retail}).xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
@@ -728,4 +729,130 @@ with tab_retail_base:
             st.text("\n".join(log_messages_retail))
 
 with tab_retail_site:
-    st.info("Вкладка «Розничные клиенты (сайт)» пока пустая.")
+    uploaded_file_retail_site = st.file_uploader(
+        "Загрузите HTML файл",
+        type=["html", "htm"],
+        key="retail_site_uploader",
+    )
+
+    if uploaded_file_retail_site is None:
+        st.info("Загрузите файл, чтобы начать обработку.")
+    else:
+        log_messages_site: List[str] = []
+
+        def _log_site(message: str) -> None:
+            """Добавляет сообщение в журнал обработки."""
+            log_messages_site.append(message)
+
+        try:
+            _log_site("Начинаем парсинг HTML и удаляем первую строку файла.")
+            tables_site = parse_html_tables(uploaded_file_retail_site.getvalue())
+            _log_site(f"Найдено таблиц: {len(tables_site)}.")
+        except ValueError as exc:
+            st.error(str(exc))
+            st.stop()
+
+        if not tables_site:
+            st.error("В HTML не найдено таблиц.")
+            st.stop()
+
+        if len(tables_site) > 1:
+            _log_site("В HTML обнаружено несколько таблиц, ожидаем выбор пользователя.")
+            st.warning("Найдено несколько таблиц. Выберите нужную.")
+            table_options_site = []
+            for idx, table in enumerate(tables_site, start=1):
+                preview = table.head(3).to_string(index=False)
+                table_options_site.append((idx, preview))
+
+            selected_site = st.selectbox(
+                "Таблица",
+                options=table_options_site,
+                format_func=lambda option: f"Таблица {option[0]}\n{option[1]}",
+                key="retail_site_table",
+            )
+            selected_table_site = tables_site[selected_site[0] - 1]
+            _log_site(f"Выбрана таблица номер {selected_site[0]}.")
+        else:
+            selected_table_site = tables_site[0]
+            _log_site("Используется единственная таблица в HTML.")
+
+        normalized_table_site = normalize_columns(selected_table_site)
+        columns_site = list(normalized_table_site.columns)
+        _log_site(f"Нормализованные колонки: {', '.join(columns_site)}.")
+
+        last_name_col_site = _find_column(columns_site, ("фамилия",))
+        email_col_site = _find_column(columns_site, ("e-mail", "email", "e mail"))
+        owner_col_site = _find_column(columns_site, ("ответственный",))
+
+        if not last_name_col_site or not email_col_site or not owner_col_site:
+            _log_site("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
+            header_idx_site = _find_header_row(selected_table_site.fillna("").astype(str))
+            if header_idx_site is not None:
+                _log_site(f"Заголовки найдены в строке {header_idx_site + 1}, поднимаем её.")
+                selected_table_site = _promote_header_row(selected_table_site, header_idx_site)
+                normalized_table_site = normalize_columns(selected_table_site)
+                columns_site = list(normalized_table_site.columns)
+                _log_site(f"Обновленные колонки: {', '.join(columns_site)}.")
+                last_name_col_site = _find_column(columns_site, ("фамилия",))
+                email_col_site = _find_column(columns_site, ("e-mail", "email", "e mail"))
+                owner_col_site = _find_column(columns_site, ("ответственный",))
+
+        if not last_name_col_site or not email_col_site or not owner_col_site:
+            st.error(
+                "Не удалось найти все обязательные колонки: Фамилия, E-mail, Ответственный. "
+                "Проверьте заголовки таблицы."
+            )
+            st.stop()
+
+        _log_site(
+            "Найдены колонки: "
+            f"Фамилия -> {last_name_col_site}, Email -> {email_col_site}, "
+            f"Ответственный -> {owner_col_site}."
+        )
+        initial_count_site = len(normalized_table_site)
+        _log_site(f"Исходных строк: {initial_count_site}.")
+
+        owner_values_site = normalized_table_site[owner_col_site].astype(str).str.strip()
+        step1_site = normalized_table_site[
+            normalized_table_site[email_col_site].str.contains("@", na=False)
+            & (owner_values_site == "Интернет розница")
+        ]
+        step1_count_site = len(step1_site)
+        _log_site(f"После фильтра Email/Ответственный осталось строк: {step1_count_site}.")
+
+        step2_site = clean_and_expand_emails(step1_site, email_col_site)
+        step2_count_site = len(step2_site)
+        _log_site(f"После очистки и разбиения Email осталось строк: {step2_count_site}.")
+
+        step3_site = step2_site.drop_duplicates(subset=[email_col_site], keep="first")
+        step3_count_site = len(step3_site)
+        _log_site(f"После дедупликации осталось строк: {step3_count_site}.")
+
+        result_full_site = step3_site[[last_name_col_site, email_col_site]].rename(
+            columns={last_name_col_site: "Фамилия", email_col_site: "E-Mail"}
+        )
+
+        st.subheader("Метрики обработки")
+        metrics_cols_site = st.columns(4)
+        metrics_cols_site[0].metric("Исходные строки", initial_count_site)
+        metrics_cols_site[1].metric(
+            "После фильтра", step1_count_site, delta=step1_count_site - initial_count_site
+        )
+        metrics_cols_site[2].metric(
+            "После очистки Email", step2_count_site, delta=step2_count_site - step1_count_site
+        )
+        metrics_cols_site[3].metric(
+            "После дедупликации", step3_count_site, delta=step3_count_site - step2_count_site
+        )
+
+        xlsx_bytes_site = build_xlsx_bytes(result_full_site)
+        email_count_site = len(result_full_site)
+        st.download_button(
+            label="Скачать файл XLSX",
+            data=xlsx_bytes_site,
+            file_name=f"retail_site_emails ({email_count_site}).xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with st.expander("Журнал обработки", expanded=False):
+            st.text("\n".join(log_messages_site))
