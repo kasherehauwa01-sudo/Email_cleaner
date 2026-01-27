@@ -183,7 +183,7 @@ def build_zip_archive(group_frames: Dict[str, pd.DataFrame]) -> bytes:
 
 st.set_page_config(page_title="Email Cleaner", layout="wide")
 
-st.title("Очистка и распределение email по группам")
+st.title("Обновление Email баз. Оптовые клиенты")
 
 uploaded_file = st.file_uploader(
     "Загрузите HTML файл",
@@ -302,12 +302,6 @@ metrics_cols[2].metric("После фильтра Менеджеров", step2_c
 metrics_cols[3].metric("После очистки Email", step3_count, delta=step3_count - step2_count)
 metrics_cols[4].metric("После дедупликации", step4_count, delta=step4_count - step3_count)
 
-st.subheader("Предпросмотр результата")
-st.dataframe(result_preview.head(10), use_container_width=True)
-
-with st.expander("Журнал обработки", expanded=False):
-    st.text("\n".join(log_messages))
-
 st.markdown("---")
 st.subheader("Распределение по группам")
 
@@ -363,3 +357,6 @@ st.download_button(
     file_name="email_groups.zip",
     mime="application/zip",
 )
+
+with st.expander("Журнал обработки", expanded=False):
+    st.text("\n".join(log_messages))
