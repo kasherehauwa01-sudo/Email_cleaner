@@ -507,10 +507,11 @@ with tab_corp:
         )
 
         xlsx_bytes = build_xlsx_bytes(result_preview_corp)
+        email_count_corp = len(result_preview_corp)
         st.download_button(
             label="Скачать файл XLSX",
             data=xlsx_bytes,
-            file_name="corporate_emails.xlsx",
+            file_name=f"corporate_emails ({email_count_corp}).xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
