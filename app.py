@@ -172,12 +172,13 @@ def build_xlsx_bytes(df: pd.DataFrame) -> bytes:
 
 
 def build_zip_archive(group_frames: Dict[str, pd.DataFrame]) -> bytes:
-    """Формирует ZIP-архив с XLSX файлами."""
+    """Формирует ZIP-архив с XLSX файлами и количеством email в названии."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zipf:
         for group_name, frame in group_frames.items():
             xlsx_bytes = build_xlsx_bytes(frame)
-            zipf.writestr(f"{group_name}.xlsx", xlsx_bytes)
+            email_count = len(frame)
+            zipf.writestr(f"{group_name} ({email_count}).xlsx", xlsx_bytes)
     return buffer.getvalue()
 
 
