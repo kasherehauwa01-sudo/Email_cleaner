@@ -63,7 +63,7 @@ def parse_html_tables(html_bytes: bytes) -> List[pd.DataFrame]:
 
 @st.cache_data(show_spinner=False)
 def parse_xml_tables(xml_bytes: bytes) -> List[pd.DataFrame]:
-    """Читает XML/MXL и возвращает список таблиц (одна таблица = один DataFrame)."""
+    """Читает XML и возвращает список таблиц (одна таблица = один DataFrame)."""
     try:
         xml_text = xml_bytes.decode("utf-8", errors="ignore")
         df = pd.read_xml(io.StringIO(xml_text))
@@ -197,7 +197,7 @@ st.title("Очистка и распределение email по группам
 
 uploaded_file = st.file_uploader(
     "Загрузите HTML/XML файл",
-    type=["html", "htm", "xml", "mxl"],
+    type=["html", "htm", "xml"],
 )
 
 if uploaded_file is None:
@@ -214,9 +214,9 @@ def _log(message: str) -> None:
 
 try:
     file_name = (uploaded_file.name or "").lower()
-    is_xml = file_name.endswith((".xml", ".mxl"))
+    is_xml = file_name.endswith(".xml")
     if is_xml:
-        _log("Начинаем парсинг XML/MXL файла.")
+        _log("Начинаем парсинг XML файла.")
         tables = parse_xml_tables(uploaded_file.getvalue())
     else:
         _log("Начинаем парсинг HTML и удаляем первую строку файла.")
@@ -305,9 +305,10 @@ step4 = step3.drop_duplicates(subset=[email_col], keep="first")
 step4_count = len(step4)
 _log(f"После дедупликации осталось строк: {step4_count}.")
 
-result = step4[[client_col, email_col, manager_col]].rename(
+result_full = step4[[client_col, email_col, manager_col]].rename(
     columns={client_col: "Клиент", email_col: "Email", manager_col: "Менеджер"}
 )
+result_preview = result_full.drop(columns=["Менеджер"])
 
 st.subheader("Метрики обработки")
 metrics_cols = st.columns(5)
@@ -318,7 +319,7 @@ metrics_cols[3].metric("После очистки Email", step3_count, delta=ste
 metrics_cols[4].metric("После дедупликации", step4_count, delta=step4_count - step3_count)
 
 st.subheader("Предпросмотр результата")
-st.dataframe(result.head(10), use_container_width=True)
+st.dataframe(result_preview.head(10), use_container_width=True)
 
 with st.expander("Журнал обработки", expanded=False):
     st.text("\n".join(log_messages))
@@ -326,7 +327,7 @@ with st.expander("Журнал обработки", expanded=False):
 st.markdown("---")
 st.subheader("Распределение по группам")
 
-unique_managers = sorted(result["Менеджер"].unique())
+unique_managers = sorted(result_full["Менеджер"].unique())
 
 selected_managers = {}
 for group_name in GROUPS:
@@ -356,22 +357,25 @@ for group_name in GROUPS:
         default=current_selection,
         key=key,
     )
-    remaining_managers = [manager for manager in unique_managers if manager not in selected_managers[group_name]]
-    if remaining_managers:
-        st.caption("Не выбраны: " + ", ".join(remaining_managers))
-    else:
-        st.caption("Выбраны все")
+selected_all = set()
+for managers in selected_managers.values():
+    selected_all.update(managers)
 
-if st.button("Сформировать архив XLSX"):
-    group_frames = {}
-    for group_name, managers in selected_managers.items():
-        filtered = result[result["Менеджер"].isin(managers)].copy()
-        group_frames[group_name] = filtered
+remaining_managers = [manager for manager in unique_managers if manager not in selected_all]
+if remaining_managers:
+    st.caption("Не выбраны: " + ", ".join(remaining_managers))
+else:
+    st.caption("Выбраны все")
 
-    zip_bytes = build_zip_archive(group_frames)
-    st.download_button(
-        label="Скачать ZIP архив",
-        data=zip_bytes,
-        file_name="email_groups.zip",
-        mime="application/zip",
-    )
+group_frames = {}
+for group_name, managers in selected_managers.items():
+    filtered = result_full[result_full["Менеджер"].isin(managers)].copy()
+    group_frames[group_name] = filtered.drop(columns=["Менеджер"])
+
+zip_bytes = build_zip_archive(group_frames)
+st.download_button(
+    label="Скачать архив XLSX",
+    data=zip_bytes,
+    file_name="email_groups.zip",
+    mime="application/zip",
+)
