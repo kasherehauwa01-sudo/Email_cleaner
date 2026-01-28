@@ -754,11 +754,24 @@ with tab_retail_site:
 
         try:
             file_name_site = (uploaded_file_retail_site.name or "").lower()
-            engine_site = "xlrd" if file_name_site.endswith(".xls") else "openpyxl"
-            _log_site(f"Начинаем парсинг XLS/XLSX файла (engine={engine_site}).")
-            tables_site = [pd.read_excel(uploaded_file_retail_site, engine=engine_site)]
+            primary_engine = "xlrd" if file_name_site.endswith(".xls") else "openpyxl"
+            fallback_engine = "openpyxl" if primary_engine == "xlrd" else "xlrd"
+            _log_site(f"Начинаем парсинг XLS/XLSX файла (engine={primary_engine}).")
+            try:
+                tables_site = [
+                    pd.read_excel(uploaded_file_retail_site, engine=primary_engine)
+                ]
+            except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
+                _log_site(
+                    f"Не удалось прочитать файл через {primary_engine}: {exc}. "
+                    f"Пробуем {fallback_engine}."
+                )
+                uploaded_file_retail_site.seek(0)
+                tables_site = [
+                    pd.read_excel(uploaded_file_retail_site, engine=fallback_engine)
+                ]
             _log_site(f"Найдено таблиц: {len(tables_site)}.")
-        except ValueError as exc:
+        except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
             st.error(str(exc))
             st.stop()
 
