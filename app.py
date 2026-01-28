@@ -112,8 +112,16 @@ def _find_column(columns: List[str], keywords: Tuple[str, ...]) -> str | None:
 
 
 def _find_header_row(df: pd.DataFrame) -> int | None:
-    """Ищет строку, которая содержит заголовки Клиент/Email/Менеджер."""
-    keywords = ("клиент", "e-mail", "email", "e mail", "менеджер")
+    """Ищет строку, которая содержит заголовки Клиент/Email/Менеджер/Фамилия/Ответственный."""
+    keywords = (
+        "клиент",
+        "e-mail",
+        "email",
+        "e mail",
+        "менеджер",
+        "фамилия",
+        "ответственный",
+    )
     for idx in range(len(df)):
         row_values = df.iloc[idx].astype(str).fillna("").tolist()
         normalized_cells = [
@@ -745,8 +753,10 @@ with tab_retail_site:
             log_messages_site.append(message)
 
         try:
-            _log_site("Начинаем парсинг XLS/XLSX файла.")
-            tables_site = [pd.read_excel(uploaded_file_retail_site)]
+            file_name_site = (uploaded_file_retail_site.name or "").lower()
+            engine_site = "xlrd" if file_name_site.endswith(".xls") else "openpyxl"
+            _log_site(f"Начинаем парсинг XLS/XLSX файла (engine={engine_site}).")
+            tables_site = [pd.read_excel(uploaded_file_retail_site, engine=engine_site)]
             _log_site(f"Найдено таблиц: {len(tables_site)}.")
         except ValueError as exc:
             st.error(str(exc))
