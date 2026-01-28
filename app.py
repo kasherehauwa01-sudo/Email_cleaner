@@ -745,8 +745,10 @@ with tab_retail_site:
             log_messages_site.append(message)
 
         try:
-            _log_site("Начинаем парсинг XLS/XLSX файла.")
-            tables_site = [pd.read_excel(uploaded_file_retail_site)]
+            file_name_site = (uploaded_file_retail_site.name or "").lower()
+            engine_site = "xlrd" if file_name_site.endswith(".xls") else "openpyxl"
+            _log_site(f"Начинаем парсинг XLS/XLSX файла (engine={engine_site}).")
+            tables_site = [pd.read_excel(uploaded_file_retail_site, engine=engine_site)]
             _log_site(f"Найдено таблиц: {len(tables_site)}.")
         except ValueError as exc:
             st.error(str(exc))
