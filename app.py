@@ -730,8 +730,8 @@ with tab_retail_base:
 
 with tab_retail_site:
     uploaded_file_retail_site = st.file_uploader(
-        "Загрузите HTML файл",
-        type=["html", "htm"],
+        "Загрузите XLS/XLSX файл",
+        type=["xls", "xlsx"],
         key="retail_site_uploader",
     )
 
@@ -745,8 +745,8 @@ with tab_retail_site:
             log_messages_site.append(message)
 
         try:
-            _log_site("Начинаем парсинг HTML и удаляем первую строку файла.")
-            tables_site = parse_html_tables(uploaded_file_retail_site.getvalue())
+            _log_site("Начинаем парсинг XLS/XLSX файла.")
+            tables_site = [pd.read_excel(uploaded_file_retail_site)]
             _log_site(f"Найдено таблиц: {len(tables_site)}.")
         except ValueError as exc:
             st.error(str(exc))
