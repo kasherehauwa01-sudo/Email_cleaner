@@ -754,21 +754,24 @@ with tab_retail_site:
 
         try:
             file_name_site = (uploaded_file_retail_site.name or "").lower()
-            primary_engine = "xlrd" if file_name_site.endswith(".xls") else "openpyxl"
-            fallback_engine = "openpyxl" if primary_engine == "xlrd" else "xlrd"
-            _log_site(f"Начинаем парсинг XLS/XLSX файла (engine={primary_engine}).")
+            file_bytes_site = uploaded_file_retail_site.getvalue()
+            is_xlsx = file_bytes_site[:2] == b\"PK\"
+            primary_engine = \"openpyxl\" if is_xlsx else \"xlrd\"
+            fallback_engine = \"xlrd\" if primary_engine == \"openpyxl\" else \"openpyxl\"
+            _log_site(
+                f\"Начинаем парсинг XLS/XLSX файла (engine={primary_engine}, is_xlsx={is_xlsx}).\"
+            )
             try:
                 tables_site = [
-                    pd.read_excel(uploaded_file_retail_site, engine=primary_engine)
+                    pd.read_excel(io.BytesIO(file_bytes_site), engine=primary_engine)
                 ]
             except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
                 _log_site(
                     f"Не удалось прочитать файл через {primary_engine}: {exc}. "
                     f"Пробуем {fallback_engine}."
                 )
-                uploaded_file_retail_site.seek(0)
                 tables_site = [
-                    pd.read_excel(uploaded_file_retail_site, engine=fallback_engine)
+                    pd.read_excel(io.BytesIO(file_bytes_site), engine=fallback_engine)
                 ]
             _log_site(f"Найдено таблиц: {len(tables_site)}.")
         except Exception as exc:  # noqa: BLE001 - показываем ошибку пользователю
