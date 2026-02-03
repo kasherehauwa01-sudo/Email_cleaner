@@ -755,11 +755,11 @@ with tab_retail_site:
         try:
             file_name_site = (uploaded_file_retail_site.name or "").lower()
             file_bytes_site = uploaded_file_retail_site.getvalue()
-            is_xlsx = file_bytes_site[:2] == b\"PK\"
-            primary_engine = \"openpyxl\" if is_xlsx else \"xlrd\"
-            fallback_engine = \"xlrd\" if primary_engine == \"openpyxl\" else \"openpyxl\"
+            is_xlsx = file_bytes_site[:2] == b"PK"
+            primary_engine = "openpyxl" if is_xlsx else "xlrd"
+            fallback_engine = "xlrd" if primary_engine == "openpyxl" else "openpyxl"
             _log_site(
-                f\"Начинаем парсинг XLS/XLSX файла (engine={primary_engine}, is_xlsx={is_xlsx}).\"
+                f"Начинаем парсинг XLS/XLSX файла (engine={primary_engine}, is_xlsx={is_xlsx})."
             )
             try:
                 tables_site = [
