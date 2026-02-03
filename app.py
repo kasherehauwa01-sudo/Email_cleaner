@@ -97,7 +97,14 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     normalized = normalized.fillna("")
     normalized = normalized.astype(str)
     normalized.columns = [
-        re.sub(r"\s+", " ", str(col)).strip().lower() for col in normalized.columns
+        re.sub(r"\s+", " ", str(col).replace("\xa0", " "))
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
+        .replace("‑", "-")
+        .strip()
+        .lower()
+        for col in normalized.columns
     ]
     return normalized
 
