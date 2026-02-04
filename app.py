@@ -128,6 +128,7 @@ def _find_header_row(df: pd.DataFrame) -> int | None:
         "менеджер",
         "фамилия",
         "ответственный",
+        "отвественный",
     )
     for idx in range(len(df)):
         row_values = df.iloc[idx].astype(str).fillna("").tolist()
@@ -815,7 +816,7 @@ with tab_retail_site:
 
         last_name_col_site = _find_column(columns_site, ("фамилия",))
         email_col_site = _find_column(columns_site, ("e-mail", "email", "e mail"))
-        owner_col_site = _find_column(columns_site, ("ответственный",))
+        owner_col_site = _find_column(columns_site, ("ответственный", "отвественный"))
 
         if not last_name_col_site or not email_col_site or not owner_col_site:
             _log_site("Обязательные колонки не найдены в заголовках, ищем ниже в строках.")
@@ -828,7 +829,7 @@ with tab_retail_site:
                 _log_site(f"Обновленные колонки: {', '.join(columns_site)}.")
                 last_name_col_site = _find_column(columns_site, ("фамилия",))
                 email_col_site = _find_column(columns_site, ("e-mail", "email", "e mail"))
-                owner_col_site = _find_column(columns_site, ("ответственный",))
+                owner_col_site = _find_column(columns_site, ("ответственный", "отвественный"))
 
         if not last_name_col_site or not email_col_site or not owner_col_site:
             st.error(
