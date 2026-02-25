@@ -1,6 +1,7 @@
 import io
 import re
 import zipfile
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import pandas as pd
@@ -74,6 +75,12 @@ RETAIL_CLIENT_EXCLUDE_KEYWORDS = [
     "стс-волгоград",
     "фгуп",
     "гуз",
+]
+
+EMAIL_EXCLUDE_FILES = [
+    "Ne otkravali 300 dney roznica.xlsx",
+    "Status_problemnie_otdel prodaj.xlsx",
+    "unsubscribed.xlsx",
 ]
 
 
@@ -224,6 +231,28 @@ def build_zip_archive(group_frames: Dict[str, pd.DataFrame]) -> bytes:
     return buffer.getvalue()
 
 
+@st.cache_data(show_spinner=False)
+def load_excluded_emails() -> set[str]:
+    """Загружает список email для исключения из внешних Excel-файлов рядом с app.py."""
+    base_dir = Path(__file__).resolve().parent
+    excluded: set[str] = set()
+    for file_name in EMAIL_EXCLUDE_FILES:
+        file_path = base_dir / file_name
+        if not file_path.exists():
+            continue
+        try:
+            file_df = pd.read_excel(file_path)
+            file_df = normalize_columns(file_df)
+            email_col = _find_column(list(file_df.columns), ("e-mail", "email", "e mail"))
+            if not email_col:
+                continue
+            values = file_df[email_col].astype(str).str.strip().str.lower()
+            excluded.update(value for value in values if "@" in value)
+        except Exception:
+            continue
+    return excluded
+
+
 st.set_page_config(page_title="Email Cleaner", layout="wide")
 
 st.title("Обновление Email баз. Оптовые клиенты")
@@ -247,6 +276,7 @@ with tab_opt:
         st.info("Загрузите файл, чтобы начать обработку.")
     else:
         log_messages: List[str] = []
+        excluded_emails = load_excluded_emails()
 
         def _log(message: str) -> None:
             """Добавляет сообщение в журнал обработки."""
@@ -339,6 +369,14 @@ with tab_opt:
         step4_count = len(step4)
         _log(f"После дедупликации осталось строк: {step4_count}.")
 
+        if excluded_emails:
+            before_exclude_count = len(step4)
+            step4 = step4[~step4[email_col].str.lower().isin(excluded_emails)]
+            _log(
+                "После исключения email из внешних файлов осталось строк: "
+                f"{len(step4)} (удалено {before_exclude_count - len(step4)})."
+            )
+
         result_full = step4[[client_col, email_col, manager_col]].rename(
             columns={client_col: "Клиент", email_col: "Email", manager_col: "Менеджер"}
         )
@@ -426,6 +464,7 @@ with tab_corp:
         st.info("Загрузите файл, чтобы начать обработку.")
     else:
         log_messages_corp: List[str] = []
+        excluded_emails = load_excluded_emails()
 
         def _log_corp(message: str) -> None:
             """Добавляет сообщение в журнал обработки."""
@@ -523,6 +562,14 @@ with tab_corp:
         step4_count_corp = len(step4_corp)
         _log_corp(f"После дедупликации осталось строк: {step4_count_corp}.")
 
+        if excluded_emails:
+            before_exclude_count_corp = len(step4_corp)
+            step4_corp = step4_corp[~step4_corp[email_col_corp].str.lower().isin(excluded_emails)]
+            _log_corp(
+                "После исключения email из внешних файлов осталось строк: "
+                f"{len(step4_corp)} (удалено {before_exclude_count_corp - len(step4_corp)})."
+            )
+
         result_full_corp = step4_corp[[client_col_corp, email_col_corp, manager_col_corp]].rename(
             columns={
                 client_col_corp: "Клиент",
@@ -572,6 +619,7 @@ with tab_retail_base:
         st.info("Загрузите файл, чтобы начать обработку.")
     else:
         log_messages_retail: List[str] = []
+        excluded_emails = load_excluded_emails()
 
         def _log_retail(message: str) -> None:
             """Добавляет сообщение в журнал обработки."""
@@ -700,6 +748,16 @@ with tab_retail_base:
         step4_count_retail = len(step4_retail)
         _log_retail(f"После дедупликации осталось строк: {step4_count_retail}.")
 
+        if excluded_emails:
+            before_exclude_count_retail = len(step4_retail)
+            step4_retail = step4_retail[
+                ~step4_retail[email_col_retail].str.lower().isin(excluded_emails)
+            ]
+            _log_retail(
+                "После исключения email из внешних файлов осталось строк: "
+                f"{len(step4_retail)} (удалено {before_exclude_count_retail - len(step4_retail)})."
+            )
+
         result_full_retail = step4_retail[
             [client_col_retail, email_col_retail, place_col_retail, birthday_col_retail]
         ].rename(
@@ -755,6 +813,7 @@ with tab_retail_site:
         st.info("Загрузите файл, чтобы начать обработку.")
     else:
         log_messages_site: List[str] = []
+        excluded_emails = load_excluded_emails()
 
         def _log_site(message: str) -> None:
             """Добавляет сообщение в журнал обработки."""
@@ -861,6 +920,14 @@ with tab_retail_site:
         step3_site = step2_site.drop_duplicates(subset=[email_col_site], keep="first")
         step3_count_site = len(step3_site)
         _log_site(f"После дедупликации осталось строк: {step3_count_site}.")
+
+        if excluded_emails:
+            before_exclude_count_site = len(step3_site)
+            step3_site = step3_site[~step3_site[email_col_site].str.lower().isin(excluded_emails)]
+            _log_site(
+                "После исключения email из внешних файлов осталось строк: "
+                f"{len(step3_site)} (удалено {before_exclude_count_site - len(step3_site)})."
+            )
 
         result_full_site = step3_site[[last_name_col_site, email_col_site]].rename(
             columns={last_name_col_site: "Фамилия", email_col_site: "E-Mail"}
