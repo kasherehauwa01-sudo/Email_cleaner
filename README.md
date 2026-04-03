@@ -75,8 +75,8 @@ Streamlit-приложение для загрузки таблиц клиент
 Если рядом с `app.py` находятся следующие файлы, email из их таблиц исключаются из всех выгрузок:
 
 - `Ne otkravali 300 dney roznica.xlsx`
+- `Otpiski.xlsx`
 - `Status_problemnie_otdel prodaj.xlsx`
-- `unsubscribed.xlsx`
 
 Приложение автоматически пытается найти в них колонку email (`E-mail`/`Email`) и удаляет совпадающие адреса после этапа дедупликации.
 

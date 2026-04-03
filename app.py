@@ -79,8 +79,8 @@ RETAIL_CLIENT_EXCLUDE_KEYWORDS = [
 
 EMAIL_EXCLUDE_FILES = [
     "Ne otkravali 300 dney roznica.xlsx",
+    "Otpiski.xlsx",
     "Status_problemnie_otdel prodaj.xlsx",
-    "unsubscribed.xlsx",
 ]
 
 
